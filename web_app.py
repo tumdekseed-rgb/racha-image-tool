@@ -59,6 +59,10 @@ with st.sidebar:
 # ==========================================
 uploaded_files = st.file_uploader("ลากไฟล์รูปภาพมาวางที่นี่", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
 
+# ✨ ฟีเจอร์ใหม่: ล้างความจำอัตโนมัติเมื่อกดกากบาทเอาไฟล์ออกจากกล่องด้านบนจนหมด
+if not uploaded_files:
+    st.session_state.dismissed_files = set()
+
 if uploaded_files:
     # กรองไฟล์ที่ผู้ใช้เคยกดปุ่ม "ลบ" ออกไปแล้ว
     active_files = [f for f in uploaded_files if f.name not in st.session_state.dismissed_files]
@@ -80,7 +84,7 @@ if uploaded_files:
                 if img.mode in ("RGBA", "P"):
                     img = img.convert("RGB")
                 
-                # --- ระบบสุ่มค่าสมจริงระดับสูง (Randomize Advanced EXIF) ---
+                # --- ระบบสุ่มค่าสมจริงระดับสูง ---
                 f_val = random.choice([(14, 10), (18, 10), (22, 10), (28, 10), (40, 10), (56, 10), (80, 10)])
                 exp_val = random.choice([(1, 60), (1, 125), (1, 160), (1, 250), (1, 500), (1, 1000), (1, 2000)])
                 iso_val = random.choice([50, 100, 200, 400, 800, 1600])
@@ -107,7 +111,6 @@ if uploaded_files:
                         piexif.ExifIFD.FNumber: f_val,
                         piexif.ExifIFD.ISOSpeedRatings: iso_val,
                         piexif.ExifIFD.FocalLength: focal_val,
-                        # แท็กเชิงลึก
                         piexif.ExifIFD.Contrast: contrast_val,
                         piexif.ExifIFD.Saturation: saturation_val,
                         piexif.ExifIFD.Sharpness: sharpness_val,
@@ -121,7 +124,6 @@ if uploaded_files:
                     }
                 }
                 
-                # เช็กค่าว่าง ถ้ามีคำอธิบายถึงจะยัดลง EXIF
                 if img_desc.strip():
                     windows_title = img_desc.encode('utf-16le')
                     exif_dict["0th"][piexif.ImageIFD.ImageDescription] = img_desc.encode('utf-8')
@@ -150,7 +152,7 @@ if uploaded_files:
                 with col_info:
                     st.write(f"**ไฟล์ใหม่:** `{new_filename}`")
                     st.write(f"**ขนาด:** {len(img_buffer.getvalue()) / 1024:.1f} KB") 
-                    st.caption(f"📸 สุ่มค่ากล้อง: f/{f_val[0]/10} | 1/{exp_val[1]}s | ISO {iso_val} | เลนส์ {focal_val[0]}mm")
+                    st.caption(f"📸 สุ่มค่า: f/{f_val[0]/10} | 1/{exp_val[1]}s | ISO {iso_val} | เลนส์ {focal_val[0]}mm")
                     if img_desc.strip():
                         st.caption(f"🏷️ แนบคำอธิบายภาพแล้ว")
                 with col_action:
@@ -162,7 +164,7 @@ if uploaded_files:
                         key=f"dl_{i}_{uploaded_file.name}",
                         use_container_width=True
                     )
-                    # ปุ่มลบรูปภาพที่ไม่ต้องการ
+                    # ปุ่มลบ
                     if st.button("❌ ลบ", key=f"del_{i}_{uploaded_file.name}", use_container_width=True):
                         st.session_state.dismissed_files.add(uploaded_file.name)
                         st.rerun()
@@ -172,4 +174,8 @@ if uploaded_files:
             except Exception as e:
                 st.error(f"❌ เกิดข้อผิดพลาดกับไฟล์ {uploaded_file.name}: {e}")
     else:
-        st.info("ไม่มีรูปภาพรอประมวลผลบนหน้าจอแล้วครับ (ลากไฟล์ชุดใหม่ลงมาได้เลย)")
+        # ✨ ฟีเจอร์ใหม่: ถ้าเผลอกดลบไปหมดแล้ว จะมีปุ่มให้กดเรียกกลับคืนมาได้
+        st.info("รูปภาพชุดนี้ถูกเคลียร์ออกไปจากหน้าจอแล้วครับ")
+        if st.button("🔄 ดึงภาพชุดเดิมกลับมาใหม่", use_container_width=True):
+            st.session_state.dismissed_files = set()
+            st.rerun()
