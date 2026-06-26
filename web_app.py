@@ -5,14 +5,20 @@ import io
 import random
 
 # ตั้งค่าหน้าเว็บ
-st.set_page_config(page_title="Image SEO Optimizer Pro", page_icon="⚙️", layout="wide")
-st.title("ระบบแปลงภาพและฝังข้อมูล SEO (Pro Version)")
-st.write("อัปเกรดระบบสุ่มค่ากล้อง (Randomize) และฝัง Metadata ระดับลึกรองรับ Windows Properties")
+st.set_page_config(page_title="Image SEO Optimizer Max", page_icon="⚙️", layout="wide")
+st.title("ระบบแปลงภาพและฝังข้อมูล SEO (Max Version)")
+
+# ==========================================
+# จัดการ State สำหรับการซ่อน/ลบรูปภาพ
+# ==========================================
+if 'dismissed_files' not in st.session_state:
+    st.session_state.dismissed_files = set()
 
 # ==========================================
 # ข้อมูลจำลองกล้อง (Camera Profiles)
 # ==========================================
 CAMERA_PROFILES = {
+    "📱 Apple iPhone 17 Pro Max": {"make": b"Apple", "model": b"iPhone 17 Pro Max"},
     "📱 Apple iPhone 15 Pro Max": {"make": b"Apple", "model": b"iPhone 15 Pro Max"},
     "📷 Full-Frame: Canon EOS R5": {"make": b"Canon", "model": b"Canon EOS R5"},
     "📷 Full-Frame: Sony Alpha 1": {"make": b"SONY", "model": b"ILCE-1"},
@@ -33,9 +39,12 @@ with st.sidebar:
         domain_choice = st.text_input("พิมพ์ชื่อเว็บไซต์ของคุณ:")
         
     st.subheader("2. คีย์เวิร์ดและชื่อไฟล์")
-    img_desc = st.text_area("คีย์เวิร์ด/คำอธิบายภาพ (SEO):", "Premium stainless steel equipment")
+    img_desc = st.text_area(
+        "คีย์เวิร์ด/คำอธิบายภาพ (ปล่อยว่างได้):", 
+        value="", 
+        placeholder="เช่น Premium SUS 304 stainless steel equipment with adjustable feet"
+    )
     
-    # ระบบเลือกตำแหน่งชื่อไฟล์
     keyword_name = st.text_input("คำศัพท์สำหรับตั้งชื่อไฟล์ (เช่น ice-bin)", "")
     name_position = st.radio("ตำแหน่งคีย์เวิร์ดในชื่อไฟล์:", ["เอาไว้ด้านหน้า (Prefix)", "เอาไว้ด้านหลัง (Suffix)"])
     
@@ -51,81 +60,116 @@ with st.sidebar:
 uploaded_files = st.file_uploader("ลากไฟล์รูปภาพมาวางที่นี่", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
 
 if uploaded_files:
-    st.write("---")
-    st.write("### 📥 ผลลัพธ์พร้อมดาวน์โหลด")
+    # กรองไฟล์ที่ผู้ใช้เคยกดปุ่ม "ลบ" ออกไปแล้ว
+    active_files = [f for f in uploaded_files if f.name not in st.session_state.dismissed_files]
     
-    for i, uploaded_file in enumerate(uploaded_files):
-        try:
-            img = Image.open(uploaded_file)
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-            
-            # --- ระบบสุ่มค่าสมจริง (Randomize EXIF Data) ---
-            # สุ่มรูรับแสง f/1.4 ถึง f/8.0 (ค่าใน EXIF ต้องคูณ 10)
-            f_val = random.choice([(14, 10), (18, 10), (28, 10), (40, 10), (56, 10), (80, 10)])
-            # สุ่มสปีดชัตเตอร์ 1/125 ถึง 1/1000
-            exp_val = random.choice([(1, 125), (1, 160), (1, 250), (1, 500), (1, 1000)])
-            # สุ่ม ISO
-            iso_val = random.choice([100, 200, 400, 800])
-            # สุ่มระยะเลนส์ (Focal Length)
-            focal_val = random.choice([(24, 1), (35, 1), (50, 1), (85, 1)])
-            
-            # แปลงคีย์เวิร์ดให้รองรับระบบ Windows Properties (ต้องเข้ารหัสเป็น utf-16le)
-            windows_title = img_desc.encode('utf-16le')
-            
-            exif_dict = {
-                "0th": {
-                    piexif.ImageIFD.Make: CAMERA_PROFILES[cam_choice]["make"],
-                    piexif.ImageIFD.Model: CAMERA_PROFILES[cam_choice]["model"],
-                    piexif.ImageIFD.Software: b"Adobe Photoshop Lightroom Classic",
-                    piexif.ImageIFD.ImageDescription: img_desc.encode('utf-8'), 
-                    piexif.ImageIFD.Copyright: domain_choice.encode('utf-8'), 
-                    # แทรกแท็กพิเศษเพื่อให้โชว์ในแท็บ Details ของ Windows
-                    piexif.ImageIFD.XPTitle: windows_title,
-                    piexif.ImageIFD.XPComment: windows_title,
-                },
-                "Exif": {
-                    piexif.ExifIFD.ExposureTime: exp_val,
-                    piexif.ExifIFD.FNumber: f_val,
-                    piexif.ExifIFD.ISOSpeedRatings: iso_val,
-                    piexif.ExifIFD.FocalLength: focal_val,
-                }
-            }
-            exif_bytes = piexif.dump(exif_dict)
-            
-            # บีบอัดภาพ
-            img_buffer = io.BytesIO()
-            img.save(img_buffer, format="webp", quality=quality_setting, method=6, exif=exif_bytes)
-            
-            # --- ระบบตั้งชื่อไฟล์ ---
-            orig_name = uploaded_file.name.rsplit('.', 1)[0]
-            if keyword_name:
-                # ลบช่องว่างออกและแทนด้วยขีด (-)
-                clean_keyword = keyword_name.replace(" ", "-")
-                if name_position == "เอาไว้ด้านหน้า (Prefix)":
-                    new_filename = f"{clean_keyword}-{orig_name}.webp"
-                else:
-                    new_filename = f"{orig_name}-{clean_keyword}.webp"
-            else:
-                new_filename = f"{orig_name}.webp"
-            
-            # แสดงผลและปุ่มดาวน์โหลด
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                st.image(img, use_container_width=True) 
-            with col2:
-                st.write(f"**ไฟล์ใหม่:** `{new_filename}`")
-                st.write(f"**ขนาด:** {len(img_buffer.getvalue()) / 1024:.1f} KB") 
-                st.caption(f"📸 สุ่มค่า: f/{f_val[0]/10} | 1/{exp_val[1]}s | ISO {iso_val} | เลนส์ {focal_val[0]}mm")
+    if active_files:
+        st.write("---")
+        col_title, col_clear = st.columns([3, 1])
+        with col_title:
+            st.write("### 📥 ผลลัพธ์พร้อมดาวน์โหลด")
+        with col_clear:
+            if st.button("🗑️ เคลียร์ภาพทั้งหมดบนหน้าจอ", use_container_width=True):
+                # นำไฟล์ที่เหลือทั้งหมดไปใส่ในรายการที่ถูกลบ
+                st.session_state.dismissed_files.update([f.name for f in active_files])
+                st.rerun()
+        
+        for i, uploaded_file in enumerate(active_files):
+            try:
+                img = Image.open(uploaded_file)
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
                 
-                st.download_button(
-                    label=f"⬇️ ดาวน์โหลด",
-                    data=img_buffer.getvalue(),
-                    file_name=new_filename,
-                    mime="image/webp",
-                    key=f"download_{i}_{new_filename}" 
-                )
-            st.write("---")
-            
-        except Exception as e:
-            st.error(f"❌ เกิดข้อผิดพลาดกับไฟล์ {uploaded_file.name}: {e}")
+                # --- ระบบสุ่มค่าสมจริงระดับสูง (Randomize Advanced EXIF) ---
+                f_val = random.choice([(14, 10), (18, 10), (22, 10), (28, 10), (40, 10), (56, 10), (80, 10)])
+                exp_val = random.choice([(1, 60), (1, 125), (1, 160), (1, 250), (1, 500), (1, 1000), (1, 2000)])
+                iso_val = random.choice([50, 100, 200, 400, 800, 1600])
+                focal_val = random.choice([(13, 1), (24, 1), (35, 1), (50, 1), (85, 1), (120, 1)])
+                
+                contrast_val = random.choice([0, 1, 2])
+                saturation_val = random.choice([0, 1, 2])
+                sharpness_val = random.choice([0, 1, 2])
+                wb_val = random.choice([0, 1])
+                metering_val = random.choice([2, 3, 5])
+                exp_prog_val = random.choice([2, 3, 4])
+                flash_val = random.choice([0, 16, 24])
+                digi_zoom_val = random.choice([(10, 10), (12, 10), (20, 10)])
+                
+                exif_dict = {
+                    "0th": {
+                        piexif.ImageIFD.Make: CAMERA_PROFILES[cam_choice]["make"],
+                        piexif.ImageIFD.Model: CAMERA_PROFILES[cam_choice]["model"],
+                        piexif.ImageIFD.Software: b"Adobe Photoshop Lightroom Classic",
+                        piexif.ImageIFD.Copyright: domain_choice.encode('utf-8'), 
+                    },
+                    "Exif": {
+                        piexif.ExifIFD.ExposureTime: exp_val,
+                        piexif.ExifIFD.FNumber: f_val,
+                        piexif.ExifIFD.ISOSpeedRatings: iso_val,
+                        piexif.ExifIFD.FocalLength: focal_val,
+                        # แท็กเชิงลึก
+                        piexif.ExifIFD.Contrast: contrast_val,
+                        piexif.ExifIFD.Saturation: saturation_val,
+                        piexif.ExifIFD.Sharpness: sharpness_val,
+                        piexif.ExifIFD.WhiteBalance: wb_val,
+                        piexif.ExifIFD.MeteringMode: metering_val,
+                        piexif.ExifIFD.ExposureProgram: exp_prog_val,
+                        piexif.ExifIFD.Flash: flash_val,
+                        piexif.ExifIFD.DigitalZoomRatio: digi_zoom_val,
+                        piexif.ExifIFD.CustomRendered: 0,
+                        piexif.ExifIFD.SceneCaptureType: 0,
+                    }
+                }
+                
+                # เช็กค่าว่าง ถ้ามีคำอธิบายถึงจะยัดลง EXIF
+                if img_desc.strip():
+                    windows_title = img_desc.encode('utf-16le')
+                    exif_dict["0th"][piexif.ImageIFD.ImageDescription] = img_desc.encode('utf-8')
+                    exif_dict["0th"][piexif.ImageIFD.XPTitle] = windows_title
+                    exif_dict["0th"][piexif.ImageIFD.XPComment] = windows_title
+                
+                exif_bytes = piexif.dump(exif_dict)
+                img_buffer = io.BytesIO()
+                img.save(img_buffer, format="webp", quality=quality_setting, method=6, exif=exif_bytes)
+                
+                # --- ระบบตั้งชื่อไฟล์ ---
+                orig_name = uploaded_file.name.rsplit('.', 1)[0]
+                if keyword_name.strip():
+                    clean_keyword = keyword_name.strip().replace(" ", "-")
+                    if name_position == "เอาไว้ด้านหน้า (Prefix)":
+                        new_filename = f"{clean_keyword}-{orig_name}.webp"
+                    else:
+                        new_filename = f"{orig_name}-{clean_keyword}.webp"
+                else:
+                    new_filename = f"{orig_name}.webp"
+                
+                # --- ส่วนแสดงผล ---
+                col_img, col_info, col_action = st.columns([1.5, 3, 1])
+                with col_img:
+                    st.image(img, use_container_width=True) 
+                with col_info:
+                    st.write(f"**ไฟล์ใหม่:** `{new_filename}`")
+                    st.write(f"**ขนาด:** {len(img_buffer.getvalue()) / 1024:.1f} KB") 
+                    st.caption(f"📸 สุ่มค่ากล้อง: f/{f_val[0]/10} | 1/{exp_val[1]}s | ISO {iso_val} | เลนส์ {focal_val[0]}mm")
+                    if img_desc.strip():
+                        st.caption(f"🏷️ แนบคำอธิบายภาพแล้ว")
+                with col_action:
+                    st.download_button(
+                        label=f"⬇️ โหลด",
+                        data=img_buffer.getvalue(),
+                        file_name=new_filename,
+                        mime="image/webp",
+                        key=f"dl_{i}_{uploaded_file.name}",
+                        use_container_width=True
+                    )
+                    # ปุ่มลบรูปภาพที่ไม่ต้องการ
+                    if st.button("❌ ลบ", key=f"del_{i}_{uploaded_file.name}", use_container_width=True):
+                        st.session_state.dismissed_files.add(uploaded_file.name)
+                        st.rerun()
+                        
+                st.write("---")
+                
+            except Exception as e:
+                st.error(f"❌ เกิดข้อผิดพลาดกับไฟล์ {uploaded_file.name}: {e}")
+    else:
+        st.info("ไม่มีรูปภาพรอประมวลผลบนหน้าจอแล้วครับ (ลากไฟล์ชุดใหม่ลงมาได้เลย)")
