@@ -9,7 +9,7 @@ import google.generativeai as genai
 st.set_page_config(page_title="Image SEO Optimizer Max Pro", page_icon="🚀", layout="wide")
 st.title("ระบบแปลงภาพ ฝังข้อมูล SEO และประทับลายน้ำ (Max Pro Version)")
 
-# จัดการ State สำหรับระบบจำลองและการบันทึกข้อมูล AI
+# จัดการ State
 if 'dismissed_files' not in st.session_state:
     st.session_state.dismissed_files = set()
 if 'ai_results' not in st.session_state:
@@ -30,13 +30,11 @@ CAMERA_PROFILES = {
 # ==========================================
 with st.sidebar:
     st.header("🔑 1. ระบบ AI วิเคราะห์ภาพจริง")
-    api_key = st.text_input("ใส่ Gemini API Key (ถ้ามี):", type="password", help="หากไม่ใส่ ระบบจะใช้ระบบจำลองคีย์เวิร์ดอัจฉริยะสำหรับงานสแตนเลสให้แทน")
-    
-    # เลือกภาษาของคีย์เวิร์ดตามที่คุณต้องการ
+    api_key = st.text_input("ใส่ Gemini API Key (ถ้ามี):", type="password", help="ใส่คีย์เพื่อเปิดใช้งานระบบสแกนภาพจริง")
     ai_lang = st.radio("ภาษาที่ต้องการให้ AI วิเคราะห์ทำ SEO:", ["ภาษาไทย (Thai)", "ภาษาอังกฤษ (English)"])
     
-    st.header("🛡️ 2. ระบบประทับตราลายน้ำ (Watermark)")
-    watermark_file = st.file_uploader("อัปโหลดโลโก้ร้านค้า (แนะนำไฟล์ .PNG พื้นใส):", type=['png'])
+    st.header("🛡️ 2. ระบบประทับตราลายน้ำ")
+    watermark_file = st.file_uploader("อัปโหลดโลโก้ร้านค้า (ไฟล์ .PNG พื้นใส):", type=['png'])
     
     if watermark_file:
         wm_position = st.selectbox("ตำแหน่งลายน้ำ:", ["ขวาล่าง (Bottom-Right)", "ซ้ายล่าง (Bottom-Left)", "ตรงกลาง (Center)", "ขวาบน (Top-Right)", "ซ้ายบน (Top-Left)"])
@@ -51,28 +49,21 @@ with st.sidebar:
     cam_choice = st.selectbox("เลือกรุ่นกล้องเพื่อฝังข้อมูล:", list(CAMERA_PROFILES.keys()))
     quality_setting = st.slider("คุณภาพไฟล์ WebP (%)", min_value=10, max_value=100, value=80, step=5)
 
-# ตั้งค่าใช้งาน Gemini API หากมีการกรอกคีย์
 if api_key:
     genai.configure(api_key=api_key)
 
-# ==========================================
 # ฟังก์ชันจัดการภาพลายน้ำ
-# ==========================================
 def apply_watermark(base_img, wm_file, position, opacity, size_pct):
     wm = Image.open(wm_file).convert("RGBA")
     base_w, base_h = base_img.size
-    
-    # คำนวณขนาดลายน้ำใหม่ตามสัดส่วนความกว้างของภาพหลัก
     new_w = int(base_w * (size_pct / 100))
     new_h = int(wm.height * (new_w / wm.width))
     wm = wm.resize((new_w, new_h), Image.Resampling.LANCZOS)
     
-    # ปรับค่าความโปร่งใส (Opacity)
     alpha = wm.split()[3]
     alpha = alpha.point(lambda p: int(p * opacity))
     wm.putalpha(alpha)
     
-    # แปะลายน้ำลงบนเลเยอร์ใส
     watermark_layer = Image.new("RGBA", (base_w, base_h), (0, 0, 0, 0))
     
     if position == "ตรงกลาง (Center)":
@@ -83,14 +74,12 @@ def apply_watermark(base_img, wm_file, position, opacity, size_pct):
         pos = (base_w - new_w - 20, 20)
     elif position == "ซ้ายล่าง (Bottom-Left)":
         pos = (20, base_h - new_h - 20)
-    else:  # ขวาล่าง
+    else:
         pos = (base_w - new_w - 20, base_h - new_h - 20)
         
     watermark_layer.paste(wm, pos)
-    
     if base_img.mode != "RGBA":
         base_img = base_img.convert("RGBA")
-        
     return Image.alpha_composite(base_img, watermark_layer).convert("RGB")
 
 # ==========================================
@@ -118,51 +107,46 @@ if uploaded_files:
         for i, uploaded_file in enumerate(active_files):
             file_key = uploaded_file.name
             
-            # --- ระบบเรียกใช้งาน AI วิเคราะห์คีย์เวิร์ดและชื่อไฟล์จริง ---
+            # ✨ [แก้ไขบั๊กที่นี่] สร้างตัวแปรตั้งต้นให้พร้อมใช้งานเสมอ ไม่ว่าจะรีเฟรชกี่รอบ
+            if "ภาษาไทย" in ai_lang:
+                default_filename = "ตู้ซิงค์สแตนเลส-อ่างล้างจาน-304"
+                default_desc = "เครื่องครัวสแตนเลสเกรด 304 คุณภาพสูง ทนทาน พื้นผิวสวยงาม พร้อมขาปรับระดับได้"
+            else:
+                default_filename = "commercial-stainless-steel-sink-cabinet"
+                default_desc = "Premium grade 304 stainless steel commercial kitchen equipment with heavy duty adjustable feet"
+            
             if file_key not in st.session_state.ai_results:
-                # ค่าเริ่มต้นหากยังไม่ได้กดวิเคราะห์ หรือไม่ได้ใส่ API Key (ระบบจำลองคีย์เวิร์ดงานสแตนเลสอัจฉริยะ)
-                if "ภาษาไทย" in ai_lang:
-                    default_filename = "ตู้ซิงค์สแตนเลส-อ่างล้างจาน-304"
-                    default_desc = "เครื่องครัวสแตนเลสเกรด 304 คุณภาพสูง ทนทาน พื้นผิวสวยงาม พร้อมขาปรับระดับได้"
-                else:
-                    default_filename = "commercial-stainless-steel-sink-cabinet"
-                    default_desc = "Premium grade 304 stainless steel commercial kitchen equipment with heavy duty adjustable feet"
-                
                 st.session_state.ai_results[file_key] = {"filename": default_filename, "desc": default_desc, "analyzed": False}
             
             try:
-                # เปิดอ่านภาพหลัก
                 orig_img = Image.open(uploaded_file)
-                
-                # แสดงแถบเครื่องมือวิเคราะห์แยกรายรูปภาพ
                 st.write(f"🖼️ **รูปภาพที่ {i+1}: {file_key}**")
                 
                 col_ui_img, col_ui_edit, col_ui_btn = st.columns([1.5, 3, 1])
                 
                 with col_ui_img:
-                    # พรีวิวภาพที่อัปโหลดมา
                     st.image(orig_img, use_container_width=True)
                 
                 with col_ui_btn:
-                    # ปุ่มสั่งให้ AI สแกนภาพและรีเสิร์จคีย์เวิร์ดค้นหาจริงแยกทีละรูป
                     if st.button("🤖 ให้ AI รีเสิร์จคีย์เวิร์ดจริง", key=f"ai_btn_{i}"):
                         if not api_key:
-                            st.warning("⚠️ กรุณากรอก Gemini API Key ที่แถบด้านซ้ายเพื่อใช้ระบบวิเคราะห์ภาพจริงจาก AI ครับ")
+                            st.warning("⚠️ กรุณากรอก Gemini API Key ที่แถบด้านซ้ายก่อนครับ")
                         else:
-                            with st.spinner("AI กำลังค้นหาคีย์เวิร์ดค้นหาจริงทาง SEO..."):
+                            with st.spinner("AI กำลังวิเคราะห์..."):
                                 try:
                                     model = genai.GenerativeModel('gemini-2.5-flash')
-                                    
                                     if "ภาษาไทย" in ai_lang:
-                                        prompt = "คุณคือผู้เชี่ยวชาญด้าน Image SEO ให้วิเคราะห์ภาพสินค้าสแตนเลสนี้ แล้วค้นหาคีย์เวิร์ดภาษาไทยที่มีคนค้นหาจริงบน Google นำคีย์เวิร์ดคำค้นหาหลักมาตั้งชื่อไฟล์แบบเชื่อมด้วยขีด (-) และแต่งประโยคคำอธิบายภาพ SEO (Description) ที่มีคำค้นหารอง เช่น อ่างล้างจาน, ถังน้ำแข็ง, ตู้สแตนเลส, ขาปรับระดับ ตอบกลับในรูปแบบนี้เท่านั้น บรรทัดแรก FILENAME: [ชื่อไฟล์ไม่มีนามสกุล] บรรทัดสอง DESCRIPTION: [คำอธิบายภาพ]"
+                                        prompt = "คุณคือผู้เชี่ยวชาญด้าน Image SEO ให้วิเคราะห์ภาพสินค้าสแตนเลสนี้ แล้วค้นหาคีย์เวิร์ดภาษาไทยที่มีคนค้นหาจริงบน Google นำคีย์เวิร์ดคำค้นหาหลักมาตั้งชื่อไฟล์แบบเชื่อมด้วยขีด (-) และแต่งประโยคคำอธิบายภาพ SEO ที่มีคำค้นหารอง เช่น อ่างล้างจาน, ถังน้ำแข็ง, ตู้สแตนเลส, ขาปรับระดับ ตอบกลับในรูปแบบนี้เท่านั้น บรรทัดแรก FILENAME: [ชื่อไฟล์ไม่มีนามสกุล] บรรทัดสอง DESCRIPTION: [คำอธิบายภาพ]"
                                     else:
-                                        prompt = "You are an Image SEO expert. Analyze this stainless steel product image. Research real high-volume Google search keywords in English. Provide a primary keyword hyphenated for the FILENAME and create a short SEO description with LSI keywords like adjustable feet, hairline finish, ice bin, stainless steel cabinet. Reply STRICTLY in this format: Line 1 FILENAME: [hyphenated-name-without-extension] Line 2 DESCRIPTION: [seo-description]"
+                                        prompt = "You are an Image SEO expert. Analyze this stainless steel product image. Provide a primary high-volume keyword hyphenated for the FILENAME and create a short SEO description with LSI keywords like adjustable feet, hairline finish, ice bin. Reply STRICTLY in this format: Line 1 FILENAME: [hyphenated-name-without-extension] Line 2 DESCRIPTION: [seo-description]"
                                     
                                     response = model.generate_content([prompt, orig_img])
                                     lines = response.text.split('\n')
                                     
+                                    # นำค่าตั้งต้นมารอไว้ก่อน เผื่อ AI ตอบไม่ครบ
                                     fname_res = default_filename
                                     desc_res = default_desc
+                                    
                                     for line in lines:
                                         if line.startswith("FILENAME:"):
                                             fname_res = line.replace("FILENAME:", "").strip()
@@ -174,22 +158,19 @@ if uploaded_files:
                                 except Exception as ai_err:
                                     st.error(f"ระบบ AI ขัดข้อง: {ai_err}")
                     
-                    # ปุ่มลบรูปภาพออก
                     if st.button("❌ ลบภาพนี้ออก", key=f"del_btn_{i}", use_container_width=True):
                         st.session_state.dismissed_files.add(file_key)
                         st.rerun()
                 
                 with col_ui_edit:
                     if st.session_state.ai_results[file_key]["analyzed"]:
-                        st.success("✨ AI ค้นหาคีย์เวิร์ดจริงและตั้งชื่อไฟล์ให้แล้ว! คุณสามารถปรับแต่งเพิ่มเติมได้ด้านล่าง:")
+                        st.success("✨ AI ค้นหาคีย์เวิร์ดจริงเสร็จสมบูรณ์!")
                     else:
-                        st.caption("💡 ระบบจำลองข้อมูลตั้งต้นไว้ให้ คุณสามารถกดปุ่มสีฟ้าด้านขวาเพื่อให้ AI สแกนภาพและคำนวณคีย์เวิร์ดจริงได้")
+                        st.caption("💡 ระบบจำลองข้อมูลตั้งต้นไว้ให้ กดปุ่ม AI เพื่อดึงคีย์เวิร์ดจริงได้เลย")
                         
-                    # เปิดโอกาสให้ผู้ใช้เลือก/แก้ไข ชื่อไฟล์ และ คีย์เวิร์ด ที่ AI แนะนำได้เองอย่างอิสระตามต้องการ
-                    final_fname = st.text_input("📁 แก้ไขชื่อไฟล์สำหรับ SEO (ระบบจะแปลงช่องว่างเป็นขีดให้อัตโนมัติ):", value=st.session_state.ai_results[file_key]["filename"], key=f"fn_input_{i}")
+                    final_fname = st.text_input("📁 แก้ไขชื่อไฟล์สำหรับ SEO:", value=st.session_state.ai_results[file_key]["filename"], key=f"fn_input_{i}")
                     final_desc = st.text_input("📝 แก้ไขรายละเอียดคีย์เวิร์ดฝังหลังภาพ:", value=st.session_state.ai_results[file_key]["desc"], key=f"desc_input_{i}")
                 
-                # --- กระบวนการประมวลผลขั้นสุดท้ายตอนโหลดไฟล์ ---
                 proc_img = orig_img
                 if watermark_file:
                     proc_img = apply_watermark(proc_img, watermark_file, wm_position, wm_opacity, wm_size)
@@ -197,7 +178,6 @@ if uploaded_files:
                 if proc_img.mode in ("RGBA", "P"):
                     proc_img = proc_img.convert("RGB")
                 
-                # สุ่มค่าพารามิเตอร์กล้อง Advanced Photo ขั้นสุด
                 f_val = random.choice([(14, 10), (18, 10), (22, 10), (28, 10), (40, 10), (56, 10), (80, 10)])
                 exp_val = random.choice([(1, 60), (1, 125), (1, 160), (1, 250), (1, 500), (1, 1000), (1, 2000)])
                 iso_val = random.choice([50, 100, 200, 400, 800, 1600])
@@ -226,7 +206,6 @@ if uploaded_files:
                     }
                 }
                 
-                # ฝังรายละเอียดที่ผู้ใช้เลือกหรือพิมพ์แก้ไขลงใน Metadata
                 if final_desc.strip():
                     windows_title = final_desc.encode('utf-16le')
                     exif_dict["0th"][piexif.ImageIFD.ImageDescription] = final_desc.encode('utf-8')
@@ -237,19 +216,18 @@ if uploaded_files:
                 img_buffer = io.BytesIO()
                 proc_img.save(img_buffer, format="webp", quality=quality_setting, method=6, exif=exif_bytes)
                 
-                # จัดรูปแบบชื่อไฟล์ดาวน์โหลดให้ปลอดภัยสำหรับ URL เว็บไซต์
                 clean_download_name = final_fname.strip().replace(" ", "-") + ".webp"
                 
                 with col_ui_btn:
                     st.download_button(
-                        label=f"⬇️ ดาวน์โหลดภาพ WebP",
+                        label=f"⬇️ โหลดภาพ WebP",
                         data=img_buffer.getvalue(),
                         file_name=clean_download_name,
                         mime="image/webp",
                         key=f"dl_btn_real_{i}",
                         use_container_width=True
                     )
-                    st.caption(f"📦 ขนาดไฟล์ที่ได้: {len(img_buffer.getvalue()) / 1024:.1f} KB")
+                    st.caption(f"📦 ขนาด: {len(img_buffer.getvalue()) / 1024:.1f} KB")
                 
                 st.write("---")
                 
@@ -257,4 +235,4 @@ if uploaded_files:
                 st.error(f"เกิดข้อผิดพลาดกับไฟล์ {file_key}: {e}")
                 
     else:
-        st.info("ไม่มีรูปภาพรอประมวลผลบนหน้าจอแล้วครับ สามารถลากไฟล์ภาพชุดใหม่ลงมาจัดหมวดหมู่ต่อได้เลยครับ")
+        st.info("ไม่มีรูปภาพรอประมวลผลบนหน้าจอแล้วครับ สามารถลากไฟล์ภาพชุดใหม่ลงมาได้เลย")
