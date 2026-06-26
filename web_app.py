@@ -107,7 +107,6 @@ if uploaded_files:
         for i, uploaded_file in enumerate(active_files):
             file_key = uploaded_file.name
             
-            # ✨ [แก้ไขบั๊กที่นี่] สร้างตัวแปรตั้งต้นให้พร้อมใช้งานเสมอ ไม่ว่าจะรีเฟรชกี่รอบ
             if "ภาษาไทย" in ai_lang:
                 default_filename = "ตู้ซิงค์สแตนเลส-อ่างล้างจาน-304"
                 default_desc = "เครื่องครัวสแตนเลสเกรด 304 คุณภาพสูง ทนทาน พื้นผิวสวยงาม พร้อมขาปรับระดับได้"
@@ -136,24 +135,32 @@ if uploaded_files:
                                 try:
                                     model = genai.GenerativeModel('gemini-2.5-flash')
                                     if "ภาษาไทย" in ai_lang:
-                                        prompt = "คุณคือผู้เชี่ยวชาญด้าน Image SEO ให้วิเคราะห์ภาพสินค้าสแตนเลสนี้ แล้วค้นหาคีย์เวิร์ดภาษาไทยที่มีคนค้นหาจริงบน Google นำคีย์เวิร์ดคำค้นหาหลักมาตั้งชื่อไฟล์แบบเชื่อมด้วยขีด (-) และแต่งประโยคคำอธิบายภาพ SEO ที่มีคำค้นหารอง เช่น อ่างล้างจาน, ถังน้ำแข็ง, ตู้สแตนเลส, ขาปรับระดับ ตอบกลับในรูปแบบนี้เท่านั้น บรรทัดแรก FILENAME: [ชื่อไฟล์ไม่มีนามสกุล] บรรทัดสอง DESCRIPTION: [คำอธิบายภาพ]"
+                                        prompt = "คุณคือผู้เชี่ยวชาญด้าน Image SEO ให้วิเคราะห์ภาพสินค้าสแตนเลสนี้ ค้นหาคีย์เวิร์ดภาษาไทยที่มีคนค้นหาจริงบน Google ตอบกลับแค่ 2 บรรทัด ห้ามใส่เครื่องหมายดอกจัน (**) เด็ดขาด บรรทัดแรก FILENAME: [ชื่อไฟล์แบบมีขีดคั่น] บรรทัดสอง DESCRIPTION: [ประโยคที่มีคำว่า ขาปรับระดับ หรือ adjustable feet]"
                                     else:
-                                        prompt = "You are an Image SEO expert. Analyze this stainless steel product image. Provide a primary high-volume keyword hyphenated for the FILENAME and create a short SEO description with LSI keywords like adjustable feet, hairline finish, ice bin. Reply STRICTLY in this format: Line 1 FILENAME: [hyphenated-name-without-extension] Line 2 DESCRIPTION: [seo-description]"
+                                        prompt = "You are an Image SEO expert. Analyze this stainless steel product. Reply STRICTLY in 2 lines with NO bold formatting (**). Line 1 FILENAME: [hyphenated-name] Line 2 DESCRIPTION: [SEO description including 'adjustable feet']"
                                     
                                     response = model.generate_content([prompt, orig_img])
-                                    lines = response.text.split('\n')
                                     
-                                    # นำค่าตั้งต้นมารอไว้ก่อน เผื่อ AI ตอบไม่ครบ
+                                    # ✨ อัปเกรดระบบอ่านข้อความ: ลบเครื่องหมายประหลาดที่ AI ชอบใส่มาทิ้งให้หมด
+                                    clean_text = response.text.replace("**", "").replace("*", "")
+                                    lines = clean_text.split('\n')
+                                    
                                     fname_res = default_filename
                                     desc_res = default_desc
                                     
                                     for line in lines:
-                                        if line.startswith("FILENAME:"):
-                                            fname_res = line.replace("FILENAME:", "").strip()
-                                        elif line.startswith("DESCRIPTION:"):
-                                            desc_res = line.replace("DESCRIPTION:", "").strip()
+                                        line = line.strip()
+                                        if line.upper().startswith("FILENAME"):
+                                            fname_res = line.split(":", 1)[-1].strip()
+                                        elif line.upper().startswith("DESCRIPTION"):
+                                            desc_res = line.split(":", 1)[-1].strip()
                                             
                                     st.session_state.ai_results[file_key] = {"filename": fname_res, "desc": desc_res, "analyzed": True}
+                                    
+                                    # ✨ บังคับอัปเดตกล่องข้อความบนหน้าเว็บทันที
+                                    st.session_state[f"fn_input_{i}"] = fname_res
+                                    st.session_state[f"desc_input_{i}"] = desc_res
+                                    
                                     st.rerun()
                                 except Exception as ai_err:
                                     st.error(f"ระบบ AI ขัดข้อง: {ai_err}")
