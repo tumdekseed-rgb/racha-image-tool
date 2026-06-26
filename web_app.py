@@ -106,16 +106,11 @@ if uploaded_files:
         
         for i, uploaded_file in enumerate(active_files):
             file_key = uploaded_file.name
+            orig_name = file_key.rsplit('.', 1)[0]
             
-            if "ภาษาไทย" in ai_lang:
-                default_filename = "ตู้ซิงค์สแตนเลส-อ่างล้างจาน-304"
-                default_desc = "เครื่องครัวสแตนเลสเกรด 304 คุณภาพสูง ทนทาน พื้นผิวสวยงาม พร้อมขาปรับระดับได้"
-            else:
-                default_filename = "commercial-stainless-steel-sink-cabinet"
-                default_desc = "Premium grade 304 stainless steel commercial kitchen equipment with heavy duty adjustable feet"
-            
+            # ✨ ค่าเริ่มต้น: ให้ชื่อไฟล์ใช้ชื่อเดิมไปก่อน และเว้นว่างช่องรายละเอียดไว้
             if file_key not in st.session_state.ai_results:
-                st.session_state.ai_results[file_key] = {"filename": default_filename, "desc": default_desc, "analyzed": False}
+                st.session_state.ai_results[file_key] = {"filename": orig_name, "desc": "", "analyzed": False}
             
             try:
                 orig_img = Image.open(uploaded_file)
@@ -127,7 +122,8 @@ if uploaded_files:
                     st.image(orig_img, use_container_width=True)
                 
                 with col_ui_btn:
-                    if st.button("🤖 ให้ AI รีเสิร์จคีย์เวิร์ดจริง", key=f"ai_btn_{i}"):
+                    # ✨ เปลี่ยน Key ควบคุมทุกอย่างให้ยึดตาม 'ชื่อไฟล์ (file_key)' แทนตัวเลข
+                    if st.button("🤖 ให้ AI รีเสิร์จคีย์เวิร์ดจริง", key=f"ai_btn_{file_key}"):
                         if not api_key:
                             st.warning("⚠️ กรุณากรอก Gemini API Key ที่แถบด้านซ้ายก่อนครับ")
                         else:
@@ -141,12 +137,11 @@ if uploaded_files:
                                     
                                     response = model.generate_content([prompt, orig_img])
                                     
-                                    # ✨ อัปเกรดระบบอ่านข้อความ: ลบเครื่องหมายประหลาดที่ AI ชอบใส่มาทิ้งให้หมด
                                     clean_text = response.text.replace("**", "").replace("*", "")
                                     lines = clean_text.split('\n')
                                     
-                                    fname_res = default_filename
-                                    desc_res = default_desc
+                                    fname_res = orig_name
+                                    desc_res = ""
                                     
                                     for line in lines:
                                         line = line.strip()
@@ -157,26 +152,33 @@ if uploaded_files:
                                             
                                     st.session_state.ai_results[file_key] = {"filename": fname_res, "desc": desc_res, "analyzed": True}
                                     
-                                    # ✨ บังคับอัปเดตกล่องข้อความบนหน้าเว็บทันที
-                                    st.session_state[f"fn_input_{i}"] = fname_res
-                                    st.session_state[f"desc_input_{i}"] = desc_res
+                                    st.session_state[f"fn_input_{file_key}"] = fname_res
+                                    st.session_state[f"desc_input_{file_key}"] = desc_res
                                     
                                     st.rerun()
                                 except Exception as ai_err:
                                     st.error(f"ระบบ AI ขัดข้อง: {ai_err}")
                     
-                    if st.button("❌ ลบภาพนี้ออก", key=f"del_btn_{i}", use_container_width=True):
+                    if st.button("❌ ลบภาพนี้ออก", key=f"del_btn_{file_key}", use_container_width=True):
                         st.session_state.dismissed_files.add(file_key)
+                        # ล้างค่าในระบบความจำทิ้งไปด้วยเพื่อความชัวร์
+                        if file_key in st.session_state.ai_results:
+                            del st.session_state.ai_results[file_key]
                         st.rerun()
                 
                 with col_ui_edit:
                     if st.session_state.ai_results[file_key]["analyzed"]:
                         st.success("✨ AI ค้นหาคีย์เวิร์ดจริงเสร็จสมบูรณ์!")
                     else:
-                        st.caption("💡 ระบบจำลองข้อมูลตั้งต้นไว้ให้ กดปุ่ม AI เพื่อดึงคีย์เวิร์ดจริงได้เลย")
+                        st.caption("💡 กดปุ่ม AI เพื่อดึงคีย์เวิร์ดจริง หรือพิมพ์ข้อมูลด้วยตัวเองได้เลยครับ")
                         
-                    final_fname = st.text_input("📁 แก้ไขชื่อไฟล์สำหรับ SEO:", value=st.session_state.ai_results[file_key]["filename"], key=f"fn_input_{i}")
-                    final_desc = st.text_input("📝 แก้ไขรายละเอียดคีย์เวิร์ดฝังหลังภาพ:", value=st.session_state.ai_results[file_key]["desc"], key=f"desc_input_{i}")
+                    # ✨ เปลี่ยน Key กล่องพิมพ์ข้อความให้ผูกกับชื่อไฟล์
+                    final_fname = st.text_input("📁 แก้ไขชื่อไฟล์สำหรับ SEO:", value=st.session_state.ai_results[file_key]["filename"], key=f"fn_input_{file_key}")
+                    final_desc = st.text_input("📝 แก้ไขรายละเอียดคีย์เวิร์ดฝังหลังภาพ:", value=st.session_state.ai_results[file_key]["desc"], key=f"desc_input_{file_key}")
+                    
+                    # บันทึกค่าที่ผู้ใช้พิมพ์แก้กลับเข้าระบบ
+                    st.session_state.ai_results[file_key]["filename"] = final_fname
+                    st.session_state.ai_results[file_key]["desc"] = final_desc
                 
                 proc_img = orig_img
                 if watermark_file:
@@ -231,7 +233,7 @@ if uploaded_files:
                         data=img_buffer.getvalue(),
                         file_name=clean_download_name,
                         mime="image/webp",
-                        key=f"dl_btn_real_{i}",
+                        key=f"dl_btn_real_{file_key}",
                         use_container_width=True
                     )
                     st.caption(f"📦 ขนาด: {len(img_buffer.getvalue()) / 1024:.1f} KB")
