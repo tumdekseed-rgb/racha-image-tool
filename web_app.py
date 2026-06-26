@@ -9,11 +9,15 @@ import google.generativeai as genai
 st.set_page_config(page_title="Image SEO Optimizer Max Pro", page_icon="🚀", layout="wide")
 st.title("ระบบแปลงภาพ ฝังข้อมูล SEO และประทับลายน้ำ (Max Pro Version)")
 
-# จัดการ State
+# ==========================================
+# จัดการ State และระบบความจำ
+# ==========================================
 if 'dismissed_files' not in st.session_state:
     st.session_state.dismissed_files = set()
 if 'ai_results' not in st.session_state:
     st.session_state.ai_results = {}
+if 'prev_uploaded_names' not in st.session_state:
+    st.session_state.prev_uploaded_names = []
 
 # โปรไฟล์กล้องระดับโปร
 CAMERA_PROFILES = {
@@ -87,6 +91,18 @@ def apply_watermark(base_img, wm_file, position, opacity, size_pct):
 # ==========================================
 uploaded_files = st.file_uploader("ลากไฟล์รูปภาพสินค้ามาวางที่นี่", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
 
+# ✨ ระบบตรวจสอบไฟล์ใหม่ (แก้ปัญหาลบแล้วลากมาใหม่ภาพไม่ขึ้น)
+current_uploaded_names = [f.name for f in uploaded_files] if uploaded_files else []
+newly_added_files = set(current_uploaded_names) - set(st.session_state.prev_uploaded_names)
+
+# ถ้าตรวจพบว่ามีการลากไฟล์เข้ามาใหม่ ให้ลืมประวัติการถูกซ่อน(ลบ)ของไฟล์ชื่อนั้นทันที
+for name in newly_added_files:
+    if name in st.session_state.dismissed_files:
+        st.session_state.dismissed_files.remove(name)
+
+st.session_state.prev_uploaded_names = current_uploaded_names
+
+# ล้างข้อมูลเมื่อเคลียร์กล่องหมด
 if not uploaded_files:
     st.session_state.dismissed_files = set()
     st.session_state.ai_results = {}
@@ -100,7 +116,7 @@ if uploaded_files:
         with col_title:
             st.write("### 📥 ผลลัพธ์พร้อมดาวน์โหลดและปรับแต่งคีย์เวิร์ด")
         with col_clear:
-            if st.button("🗑️ เคลียร์ภาพทั้งหมดบนหน้าจอ", use_container_width=True):
+            if st.button("🗑️ ซ่อนภาพทั้งหมดบนหน้าจอ", use_container_width=True):
                 st.session_state.dismissed_files.update([f.name for f in active_files])
                 st.rerun()
         
@@ -108,7 +124,6 @@ if uploaded_files:
             file_key = uploaded_file.name
             orig_name = file_key.rsplit('.', 1)[0]
             
-            # ✨ ค่าเริ่มต้น: ให้ชื่อไฟล์ใช้ชื่อเดิมไปก่อน และเว้นว่างช่องรายละเอียดไว้
             if file_key not in st.session_state.ai_results:
                 st.session_state.ai_results[file_key] = {"filename": orig_name, "desc": "", "analyzed": False}
             
@@ -122,7 +137,6 @@ if uploaded_files:
                     st.image(orig_img, use_container_width=True)
                 
                 with col_ui_btn:
-                    # ✨ เปลี่ยน Key ควบคุมทุกอย่างให้ยึดตาม 'ชื่อไฟล์ (file_key)' แทนตัวเลข
                     if st.button("🤖 ให้ AI รีเสิร์จคีย์เวิร์ดจริง", key=f"ai_btn_{file_key}"):
                         if not api_key:
                             st.warning("⚠️ กรุณากรอก Gemini API Key ที่แถบด้านซ้ายก่อนครับ")
@@ -159,9 +173,9 @@ if uploaded_files:
                                 except Exception as ai_err:
                                     st.error(f"ระบบ AI ขัดข้อง: {ai_err}")
                     
-                    if st.button("❌ ลบภาพนี้ออก", key=f"del_btn_{file_key}", use_container_width=True):
+                    # ✨ เปลี่ยนคำและใส่ Tooltip ให้ผู้ใช้งานเข้าใจว่ามันลบจากกล่องบนไม่ได้
+                    if st.button("❌ ซ่อนภาพนี้ออก", key=f"del_btn_{file_key}", help="เป็นการข้ามไม่ประมวลผลภาพนี้ (หากต้องการเอาออกจากกล่องด้านบน ต้องกด X ที่ท้ายชื่อไฟล์ด้านบนครับ)", use_container_width=True):
                         st.session_state.dismissed_files.add(file_key)
-                        # ล้างค่าในระบบความจำทิ้งไปด้วยเพื่อความชัวร์
                         if file_key in st.session_state.ai_results:
                             del st.session_state.ai_results[file_key]
                         st.rerun()
@@ -172,11 +186,9 @@ if uploaded_files:
                     else:
                         st.caption("💡 กดปุ่ม AI เพื่อดึงคีย์เวิร์ดจริง หรือพิมพ์ข้อมูลด้วยตัวเองได้เลยครับ")
                         
-                    # ✨ เปลี่ยน Key กล่องพิมพ์ข้อความให้ผูกกับชื่อไฟล์
                     final_fname = st.text_input("📁 แก้ไขชื่อไฟล์สำหรับ SEO:", value=st.session_state.ai_results[file_key]["filename"], key=f"fn_input_{file_key}")
                     final_desc = st.text_input("📝 แก้ไขรายละเอียดคีย์เวิร์ดฝังหลังภาพ:", value=st.session_state.ai_results[file_key]["desc"], key=f"desc_input_{file_key}")
                     
-                    # บันทึกค่าที่ผู้ใช้พิมพ์แก้กลับเข้าระบบ
                     st.session_state.ai_results[file_key]["filename"] = final_fname
                     st.session_state.ai_results[file_key]["desc"] = final_desc
                 
