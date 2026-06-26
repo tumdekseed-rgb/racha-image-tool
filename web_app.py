@@ -3,26 +3,24 @@ from PIL import Image
 import piexif
 import io
 import random
+import google.generativeai as genai
 
 # ตั้งค่าหน้าเว็บ
-st.set_page_config(page_title="Image SEO Optimizer Max", page_icon="⚙️", layout="wide")
-st.title("ระบบแปลงภาพและฝังข้อมูล SEO (Max Version)")
+st.set_page_config(page_title="Image SEO Optimizer Max Pro", page_icon="🚀", layout="wide")
+st.title("ระบบแปลงภาพ ฝังข้อมูล SEO และประทับลายน้ำ (Max Pro Version)")
 
-# ==========================================
-# จัดการ State สำหรับการซ่อน/ลบรูปภาพ
-# ==========================================
+# จัดการ State สำหรับระบบจำลองและการบันทึกข้อมูล AI
 if 'dismissed_files' not in st.session_state:
     st.session_state.dismissed_files = set()
+if 'ai_results' not in st.session_state:
+    st.session_state.ai_results = {}
 
-# ==========================================
-# ข้อมูลจำลองกล้อง (Camera Profiles)
-# ==========================================
+# โปรไฟล์กล้องระดับโปร
 CAMERA_PROFILES = {
     "📱 Apple iPhone 17 Pro Max": {"make": b"Apple", "model": b"iPhone 17 Pro Max"},
     "📱 Apple iPhone 15 Pro Max": {"make": b"Apple", "model": b"iPhone 15 Pro Max"},
     "📷 Full-Frame: Canon EOS R5": {"make": b"Canon", "model": b"Canon EOS R5"},
     "📷 Full-Frame: Sony Alpha 1": {"make": b"SONY", "model": b"ILCE-1"},
-    "📷 Full-Frame: Nikon Z9": {"make": b"NIKON CORPORATION", "model": b"NIKON Z 9"},
     "📸 Medium Format: Hasselblad X2D": {"make": b"Hasselblad", "model": b"X2D 100C"},
     "📸 Medium Format: Fujifilm GFX 100S": {"make": b"FUJIFILM", "model": b"GFX 100S"}
 }
@@ -31,73 +29,179 @@ CAMERA_PROFILES = {
 # แถบตั้งค่าด้านข้าง (Sidebar)
 # ==========================================
 with st.sidebar:
-    st.header("⚙️ ตั้งค่าการแปลงไฟล์")
+    st.header("🔑 1. ระบบ AI วิเคราะห์ภาพจริง")
+    api_key = st.text_input("ใส่ Gemini API Key (ถ้ามี):", type="password", help="หากไม่ใส่ ระบบจะใช้ระบบจำลองคีย์เวิร์ดอัจฉริยะสำหรับงานสแตนเลสให้แทน")
     
-    st.subheader("1. โดเมนและลิขสิทธิ์")
+    # เลือกภาษาของคีย์เวิร์ดตามที่คุณต้องการ
+    ai_lang = st.radio("ภาษาที่ต้องการให้ AI วิเคราะห์ทำ SEO:", ["ภาษาไทย (Thai)", "ภาษาอังกฤษ (English)"])
+    
+    st.header("🛡️ 2. ระบบประทับตราลายน้ำ (Watermark)")
+    watermark_file = st.file_uploader("อัปโหลดโลโก้ร้านค้า (แนะนำไฟล์ .PNG พื้นใส):", type=['png'])
+    
+    if watermark_file:
+        wm_position = st.selectbox("ตำแหน่งลายน้ำ:", ["ขวาล่าง (Bottom-Right)", "ซ้ายล่าง (Bottom-Left)", "ตรงกลาง (Center)", "ขวาบน (Top-Right)", "ซ้ายบน (Top-Left)"])
+        wm_opacity = st.slider("ความจางของลายน้ำ (Opacity)", 0.1, 1.0, 0.3, 0.05)
+        wm_size = st.slider("ขนาดของลายน้ำ (% เทียบกับภาพ)", 5, 50, 20, 5)
+
+    st.header("⚙️ 3. ข้อมูลลิขสิทธิ์และตัวแปลงไฟล์")
     domain_choice = st.selectbox("เลือกร้านค้าของคุณ:", ["rachastainless.com", "coolstain.net", "กำหนดเอง..."])
     if domain_choice == "กำหนดเอง...":
         domain_choice = st.text_input("พิมพ์ชื่อเว็บไซต์ของคุณ:")
         
-    st.subheader("2. คีย์เวิร์ดและชื่อไฟล์")
-    img_desc = st.text_area(
-        "คีย์เวิร์ด/คำอธิบายภาพ (ปล่อยว่างได้):", 
-        value="", 
-        placeholder="เช่น Premium SUS 304 stainless steel equipment with adjustable feet"
-    )
-    
-    keyword_name = st.text_input("คำศัพท์สำหรับตั้งชื่อไฟล์ (เช่น ice-bin)", "")
-    name_position = st.radio("ตำแหน่งคีย์เวิร์ดในชื่อไฟล์:", ["เอาไว้ด้านหน้า (Prefix)", "เอาไว้ด้านหลัง (Suffix)"])
-    
-    st.subheader("3. จำลองกล้องถ่ายภาพ")
     cam_choice = st.selectbox("เลือกรุ่นกล้องเพื่อฝังข้อมูล:", list(CAMERA_PROFILES.keys()))
-    
-    st.subheader("4. ระดับการบีบอัด")
     quality_setting = st.slider("คุณภาพไฟล์ WebP (%)", min_value=10, max_value=100, value=80, step=5)
+
+# ตั้งค่าใช้งาน Gemini API หากมีการกรอกคีย์
+if api_key:
+    genai.configure(api_key=api_key)
+
+# ==========================================
+# ฟังก์ชันจัดการภาพลายน้ำ
+# ==========================================
+def apply_watermark(base_img, wm_file, position, opacity, size_pct):
+    wm = Image.open(wm_file).convert("RGBA")
+    base_w, base_h = base_img.size
+    
+    # คำนวณขนาดลายน้ำใหม่ตามสัดส่วนความกว้างของภาพหลัก
+    new_w = int(base_w * (size_pct / 100))
+    new_h = int(wm.height * (new_w / wm.width))
+    wm = wm.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    
+    # ปรับค่าความโปร่งใส (Opacity)
+    alpha = wm.split()[3]
+    alpha = alpha.point(lambda p: int(p * opacity))
+    wm.putalpha(alpha)
+    
+    # แปะลายน้ำลงบนเลเยอร์ใส
+    watermark_layer = Image.new("RGBA", (base_w, base_h), (0, 0, 0, 0))
+    
+    if position == "ตรงกลาง (Center)":
+        pos = ((base_w - new_w) // 2, (base_h - new_h) // 2)
+    elif position == "ซ้ายบน (Top-Left)":
+        pos = (20, 20)
+    elif position == "ขวาบน (Top-Right)":
+        pos = (base_w - new_w - 20, 20)
+    elif position == "ซ้ายล่าง (Bottom-Left)":
+        pos = (20, base_h - new_h - 20)
+    else:  # ขวาล่าง
+        pos = (base_w - new_w - 20, base_h - new_h - 20)
+        
+    watermark_layer.paste(wm, pos)
+    
+    if base_img.mode != "RGBA":
+        base_img = base_img.convert("RGBA")
+        
+    return Image.alpha_composite(base_img, watermark_layer).convert("RGB")
 
 # ==========================================
 # พื้นที่หลัก (Main Area)
 # ==========================================
-uploaded_files = st.file_uploader("ลากไฟล์รูปภาพมาวางที่นี่", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
+uploaded_files = st.file_uploader("ลากไฟล์รูปภาพสินค้ามาวางที่นี่", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
 
-# ✨ ฟีเจอร์ใหม่: ล้างความจำอัตโนมัติเมื่อกดกากบาทเอาไฟล์ออกจากกล่องด้านบนจนหมด
 if not uploaded_files:
     st.session_state.dismissed_files = set()
+    st.session_state.ai_results = {}
 
 if uploaded_files:
-    # กรองไฟล์ที่ผู้ใช้เคยกดปุ่ม "ลบ" ออกไปแล้ว
     active_files = [f for f in uploaded_files if f.name not in st.session_state.dismissed_files]
     
     if active_files:
         st.write("---")
         col_title, col_clear = st.columns([3, 1])
         with col_title:
-            st.write("### 📥 ผลลัพธ์พร้อมดาวน์โหลด")
+            st.write("### 📥 ผลลัพธ์พร้อมดาวน์โหลดและปรับแต่งคีย์เวิร์ด")
         with col_clear:
             if st.button("🗑️ เคลียร์ภาพทั้งหมดบนหน้าจอ", use_container_width=True):
-                # นำไฟล์ที่เหลือทั้งหมดไปใส่ในรายการที่ถูกลบ
                 st.session_state.dismissed_files.update([f.name for f in active_files])
                 st.rerun()
         
         for i, uploaded_file in enumerate(active_files):
-            try:
-                img = Image.open(uploaded_file)
-                if img.mode in ("RGBA", "P"):
-                    img = img.convert("RGB")
+            file_key = uploaded_file.name
+            
+            # --- ระบบเรียกใช้งาน AI วิเคราะห์คีย์เวิร์ดและชื่อไฟล์จริง ---
+            if file_key not in st.session_state.ai_results:
+                # ค่าเริ่มต้นหากยังไม่ได้กดวิเคราะห์ หรือไม่ได้ใส่ API Key (ระบบจำลองคีย์เวิร์ดงานสแตนเลสอัจฉริยะ)
+                if "ภาษาไทย" in ai_lang:
+                    default_filename = "ตู้ซิงค์สแตนเลส-อ่างล้างจาน-304"
+                    default_desc = "เครื่องครัวสแตนเลสเกรด 304 คุณภาพสูง ทนทาน พื้นผิวสวยงาม พร้อมขาปรับระดับได้"
+                else:
+                    default_filename = "commercial-stainless-steel-sink-cabinet"
+                    default_desc = "Premium grade 304 stainless steel commercial kitchen equipment with heavy duty adjustable feet"
                 
-                # --- ระบบสุ่มค่าสมจริงระดับสูง ---
+                st.session_state.ai_results[file_key] = {"filename": default_filename, "desc": default_desc, "analyzed": False}
+            
+            try:
+                # เปิดอ่านภาพหลัก
+                orig_img = Image.open(uploaded_file)
+                
+                # แสดงแถบเครื่องมือวิเคราะห์แยกรายรูปภาพ
+                st.write(f"🖼️ **รูปภาพที่ {i+1}: {file_key}**")
+                
+                col_ui_img, col_ui_edit, col_ui_btn = st.columns([1.5, 3, 1])
+                
+                with col_ui_img:
+                    # พรีวิวภาพที่อัปโหลดมา
+                    st.image(orig_img, use_container_width=True)
+                
+                with col_ui_btn:
+                    # ปุ่มสั่งให้ AI สแกนภาพและรีเสิร์จคีย์เวิร์ดค้นหาจริงแยกทีละรูป
+                    if st.button("🤖 ให้ AI รีเสิร์จคีย์เวิร์ดจริง", key=f"ai_btn_{i}"):
+                        if not api_key:
+                            st.warning("⚠️ กรุณากรอก Gemini API Key ที่แถบด้านซ้ายเพื่อใช้ระบบวิเคราะห์ภาพจริงจาก AI ครับ")
+                        else:
+                            with st.spinner("AI กำลังค้นหาคีย์เวิร์ดค้นหาจริงทาง SEO..."):
+                                try:
+                                    model = genai.GenerativeModel('gemini-2.5-flash')
+                                    
+                                    if "ภาษาไทย" in ai_lang:
+                                        prompt = "คุณคือผู้เชี่ยวชาญด้าน Image SEO ให้วิเคราะห์ภาพสินค้าสแตนเลสนี้ แล้วค้นหาคีย์เวิร์ดภาษาไทยที่มีคนค้นหาจริงบน Google นำคีย์เวิร์ดคำค้นหาหลักมาตั้งชื่อไฟล์แบบเชื่อมด้วยขีด (-) และแต่งประโยคคำอธิบายภาพ SEO (Description) ที่มีคำค้นหารอง เช่น อ่างล้างจาน, ถังน้ำแข็ง, ตู้สแตนเลส, ขาปรับระดับ ตอบกลับในรูปแบบนี้เท่านั้น บรรทัดแรก FILENAME: [ชื่อไฟล์ไม่มีนามสกุล] บรรทัดสอง DESCRIPTION: [คำอธิบายภาพ]"
+                                    else:
+                                        prompt = "You are an Image SEO expert. Analyze this stainless steel product image. Research real high-volume Google search keywords in English. Provide a primary keyword hyphenated for the FILENAME and create a short SEO description with LSI keywords like adjustable feet, hairline finish, ice bin, stainless steel cabinet. Reply STRICTLY in this format: Line 1 FILENAME: [hyphenated-name-without-extension] Line 2 DESCRIPTION: [seo-description]"
+                                    
+                                    response = model.generate_content([prompt, orig_img])
+                                    lines = response.text.split('\n')
+                                    
+                                    fname_res = default_filename
+                                    desc_res = default_desc
+                                    for line in lines:
+                                        if line.startswith("FILENAME:"):
+                                            fname_res = line.replace("FILENAME:", "").strip()
+                                        elif line.startswith("DESCRIPTION:"):
+                                            desc_res = line.replace("DESCRIPTION:", "").strip()
+                                            
+                                    st.session_state.ai_results[file_key] = {"filename": fname_res, "desc": desc_res, "analyzed": True}
+                                    st.rerun()
+                                except Exception as ai_err:
+                                    st.error(f"ระบบ AI ขัดข้อง: {ai_err}")
+                    
+                    # ปุ่มลบรูปภาพออก
+                    if st.button("❌ ลบภาพนี้ออก", key=f"del_btn_{i}", use_container_width=True):
+                        st.session_state.dismissed_files.add(file_key)
+                        st.rerun()
+                
+                with col_ui_edit:
+                    if st.session_state.ai_results[file_key]["analyzed"]:
+                        st.success("✨ AI ค้นหาคีย์เวิร์ดจริงและตั้งชื่อไฟล์ให้แล้ว! คุณสามารถปรับแต่งเพิ่มเติมได้ด้านล่าง:")
+                    else:
+                        st.caption("💡 ระบบจำลองข้อมูลตั้งต้นไว้ให้ คุณสามารถกดปุ่มสีฟ้าด้านขวาเพื่อให้ AI สแกนภาพและคำนวณคีย์เวิร์ดจริงได้")
+                        
+                    # เปิดโอกาสให้ผู้ใช้เลือก/แก้ไข ชื่อไฟล์ และ คีย์เวิร์ด ที่ AI แนะนำได้เองอย่างอิสระตามต้องการ
+                    final_fname = st.text_input("📁 แก้ไขชื่อไฟล์สำหรับ SEO (ระบบจะแปลงช่องว่างเป็นขีดให้อัตโนมัติ):", value=st.session_state.ai_results[file_key]["filename"], key=f"fn_input_{i}")
+                    final_desc = st.text_input("📝 แก้ไขรายละเอียดคีย์เวิร์ดฝังหลังภาพ:", value=st.session_state.ai_results[file_key]["desc"], key=f"desc_input_{i}")
+                
+                # --- กระบวนการประมวลผลขั้นสุดท้ายตอนโหลดไฟล์ ---
+                proc_img = orig_img
+                if watermark_file:
+                    proc_img = apply_watermark(proc_img, watermark_file, wm_position, wm_opacity, wm_size)
+                
+                if proc_img.mode in ("RGBA", "P"):
+                    proc_img = proc_img.convert("RGB")
+                
+                # สุ่มค่าพารามิเตอร์กล้อง Advanced Photo ขั้นสุด
                 f_val = random.choice([(14, 10), (18, 10), (22, 10), (28, 10), (40, 10), (56, 10), (80, 10)])
                 exp_val = random.choice([(1, 60), (1, 125), (1, 160), (1, 250), (1, 500), (1, 1000), (1, 2000)])
                 iso_val = random.choice([50, 100, 200, 400, 800, 1600])
                 focal_val = random.choice([(13, 1), (24, 1), (35, 1), (50, 1), (85, 1), (120, 1)])
-                
-                contrast_val = random.choice([0, 1, 2])
-                saturation_val = random.choice([0, 1, 2])
-                sharpness_val = random.choice([0, 1, 2])
-                wb_val = random.choice([0, 1])
-                metering_val = random.choice([2, 3, 5])
-                exp_prog_val = random.choice([2, 3, 4])
-                flash_val = random.choice([0, 16, 24])
-                digi_zoom_val = random.choice([(10, 10), (12, 10), (20, 10)])
                 
                 exif_dict = {
                     "0th": {
@@ -111,71 +215,46 @@ if uploaded_files:
                         piexif.ExifIFD.FNumber: f_val,
                         piexif.ExifIFD.ISOSpeedRatings: iso_val,
                         piexif.ExifIFD.FocalLength: focal_val,
-                        piexif.ExifIFD.Contrast: contrast_val,
-                        piexif.ExifIFD.Saturation: saturation_val,
-                        piexif.ExifIFD.Sharpness: sharpness_val,
-                        piexif.ExifIFD.WhiteBalance: wb_val,
-                        piexif.ExifIFD.MeteringMode: metering_val,
-                        piexif.ExifIFD.ExposureProgram: exp_prog_val,
-                        piexif.ExifIFD.Flash: flash_val,
-                        piexif.ExifIFD.DigitalZoomRatio: digi_zoom_val,
-                        piexif.ExifIFD.CustomRendered: 0,
-                        piexif.ExifIFD.SceneCaptureType: 0,
+                        piexif.ExifIFD.Contrast: random.choice([0, 1, 2]),
+                        piexif.ExifIFD.Saturation: random.choice([0, 1, 2]),
+                        piexif.ExifIFD.Sharpness: random.choice([0, 1, 2]),
+                        piexif.ExifIFD.WhiteBalance: random.choice([0, 1]),
+                        piexif.ExifIFD.MeteringMode: random.choice([2, 3, 5]),
+                        piexif.ExifIFD.ExposureProgram: random.choice([2, 3, 4]),
+                        piexif.ExifIFD.Flash: random.choice([0, 16, 24]),
+                        piexif.ExifIFD.DigitalZoomRatio: random.choice([(10, 10), (12, 10)]),
                     }
                 }
                 
-                if img_desc.strip():
-                    windows_title = img_desc.encode('utf-16le')
-                    exif_dict["0th"][piexif.ImageIFD.ImageDescription] = img_desc.encode('utf-8')
+                # ฝังรายละเอียดที่ผู้ใช้เลือกหรือพิมพ์แก้ไขลงใน Metadata
+                if final_desc.strip():
+                    windows_title = final_desc.encode('utf-16le')
+                    exif_dict["0th"][piexif.ImageIFD.ImageDescription] = final_desc.encode('utf-8')
                     exif_dict["0th"][piexif.ImageIFD.XPTitle] = windows_title
                     exif_dict["0th"][piexif.ImageIFD.XPComment] = windows_title
                 
                 exif_bytes = piexif.dump(exif_dict)
                 img_buffer = io.BytesIO()
-                img.save(img_buffer, format="webp", quality=quality_setting, method=6, exif=exif_bytes)
+                proc_img.save(img_buffer, format="webp", quality=quality_setting, method=6, exif=exif_bytes)
                 
-                # --- ระบบตั้งชื่อไฟล์ ---
-                orig_name = uploaded_file.name.rsplit('.', 1)[0]
-                if keyword_name.strip():
-                    clean_keyword = keyword_name.strip().replace(" ", "-")
-                    if name_position == "เอาไว้ด้านหน้า (Prefix)":
-                        new_filename = f"{clean_keyword}-{orig_name}.webp"
-                    else:
-                        new_filename = f"{orig_name}-{clean_keyword}.webp"
-                else:
-                    new_filename = f"{orig_name}.webp"
+                # จัดรูปแบบชื่อไฟล์ดาวน์โหลดให้ปลอดภัยสำหรับ URL เว็บไซต์
+                clean_download_name = final_fname.strip().replace(" ", "-") + ".webp"
                 
-                # --- ส่วนแสดงผล ---
-                col_img, col_info, col_action = st.columns([1.5, 3, 1])
-                with col_img:
-                    st.image(img, use_container_width=True) 
-                with col_info:
-                    st.write(f"**ไฟล์ใหม่:** `{new_filename}`")
-                    st.write(f"**ขนาด:** {len(img_buffer.getvalue()) / 1024:.1f} KB") 
-                    st.caption(f"📸 สุ่มค่า: f/{f_val[0]/10} | 1/{exp_val[1]}s | ISO {iso_val} | เลนส์ {focal_val[0]}mm")
-                    if img_desc.strip():
-                        st.caption(f"🏷️ แนบคำอธิบายภาพแล้ว")
-                with col_action:
+                with col_ui_btn:
                     st.download_button(
-                        label=f"⬇️ โหลด",
+                        label=f"⬇️ ดาวน์โหลดภาพ WebP",
                         data=img_buffer.getvalue(),
-                        file_name=new_filename,
+                        file_name=clean_download_name,
                         mime="image/webp",
-                        key=f"dl_{i}_{uploaded_file.name}",
+                        key=f"dl_btn_real_{i}",
                         use_container_width=True
                     )
-                    # ปุ่มลบ
-                    if st.button("❌ ลบ", key=f"del_{i}_{uploaded_file.name}", use_container_width=True):
-                        st.session_state.dismissed_files.add(uploaded_file.name)
-                        st.rerun()
-                        
+                    st.caption(f"📦 ขนาดไฟล์ที่ได้: {len(img_buffer.getvalue()) / 1024:.1f} KB")
+                
                 st.write("---")
                 
             except Exception as e:
-                st.error(f"❌ เกิดข้อผิดพลาดกับไฟล์ {uploaded_file.name}: {e}")
+                st.error(f"เกิดข้อผิดพลาดกับไฟล์ {file_key}: {e}")
+                
     else:
-        # ✨ ฟีเจอร์ใหม่: ถ้าเผลอกดลบไปหมดแล้ว จะมีปุ่มให้กดเรียกกลับคืนมาได้
-        st.info("รูปภาพชุดนี้ถูกเคลียร์ออกไปจากหน้าจอแล้วครับ")
-        if st.button("🔄 ดึงภาพชุดเดิมกลับมาใหม่", use_container_width=True):
-            st.session_state.dismissed_files = set()
-            st.rerun()
+        st.info("ไม่มีรูปภาพรอประมวลผลบนหน้าจอแล้วครับ สามารถลากไฟล์ภาพชุดใหม่ลงมาจัดหมวดหมู่ต่อได้เลยครับ")
