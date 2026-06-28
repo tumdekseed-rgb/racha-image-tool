@@ -16,8 +16,8 @@ if 'dismissed_files' not in st.session_state:
     st.session_state.dismissed_files = set()
 if 'ai_results' not in st.session_state:
     st.session_state.ai_results = {}
-if 'prev_uploaded_names' not in st.session_state:
-    st.session_state.prev_uploaded_names = []
+if 'prev_uploaded_keys' not in st.session_state:
+    st.session_state.prev_uploaded_keys = []
 
 # โปรไฟล์กล้องระดับโปร
 CAMERA_PROFILES = {
@@ -89,26 +89,25 @@ def apply_watermark(base_img, wm_file, position, opacity, size_pct):
 # ==========================================
 # พื้นที่หลัก (Main Area)
 # ==========================================
-uploaded_files = st.file_uploader("ลากไฟล์รูปภาพสินค้ามาวางที่นี่", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
+uploaded_files = st.file_uploader("ลากไฟล์รูปภาพมาวาง หรือคลิกที่นี่แล้วกด Ctrl+V เพื่อวางรูปภาพได้เลยครับ", accept_multiple_files=True, type=['png', 'jpg', 'jpeg', 'webp'])
 
-# ✨ ระบบตรวจสอบไฟล์ใหม่ (แก้ปัญหาลบแล้วลากมาใหม่ภาพไม่ขึ้น)
-current_uploaded_names = [f.name for f in uploaded_files] if uploaded_files else []
-newly_added_files = set(current_uploaded_names) - set(st.session_state.prev_uploaded_names)
+# ✨ สร้าง Key พิเศษโดยรวมขนาดไฟล์ เพื่อป้องกันชื่อ 'image.png' ชนกันตอนผู้ใช้กดวางจากคลิปบอร์ด
+current_uploaded_keys = [f"{f.name}_{f.size}" for f in uploaded_files] if uploaded_files else []
+newly_added_keys = set(current_uploaded_keys) - set(st.session_state.prev_uploaded_keys)
 
-# ถ้าตรวจพบว่ามีการลากไฟล์เข้ามาใหม่ ให้ลืมประวัติการถูกซ่อน(ลบ)ของไฟล์ชื่อนั้นทันที
-for name in newly_added_files:
-    if name in st.session_state.dismissed_files:
-        st.session_state.dismissed_files.remove(name)
+for k in newly_added_keys:
+    if k in st.session_state.dismissed_files:
+        st.session_state.dismissed_files.remove(k)
 
-st.session_state.prev_uploaded_names = current_uploaded_names
+st.session_state.prev_uploaded_keys = current_uploaded_keys
 
-# ล้างข้อมูลเมื่อเคลียร์กล่องหมด
 if not uploaded_files:
     st.session_state.dismissed_files = set()
     st.session_state.ai_results = {}
 
 if uploaded_files:
-    active_files = [f for f in uploaded_files if f.name not in st.session_state.dismissed_files]
+    # กรองไฟล์ที่ระบบสั่งซ่อน
+    active_files = [f for f in uploaded_files if f"{f.name}_{f.size}" not in st.session_state.dismissed_files]
     
     if active_files:
         st.write("---")
@@ -116,20 +115,21 @@ if uploaded_files:
         with col_title:
             st.write("### 📥 ผลลัพธ์พร้อมดาวน์โหลดและปรับแต่งคีย์เวิร์ด")
         with col_clear:
-            if st.button("🗑️ ซ่อนภาพทั้งหมดบนหน้าจอ", use_container_width=True):
-                st.session_state.dismissed_files.update([f.name for f in active_files])
+            if st.button("🗑 `ซ่อนภาพทั้งหมดบนหน้าจอ`", use_container_width=True):
+                st.session_state.dismissed_files.update([f"{f.name}_{f.size}" for f in active_files])
                 st.rerun()
         
         for i, uploaded_file in enumerate(active_files):
-            file_key = uploaded_file.name
-            orig_name = file_key.rsplit('.', 1)[0]
+            # ผูก Key ทุกอย่างเข้ากับเอกลักษณ์เฉพาะของไฟล์นั้นๆ (ป้องกันบั๊กภาพคัดลอกวาง)
+            file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+            orig_name = uploaded_file.name.rsplit('.', 1)[0]
             
             if file_key not in st.session_state.ai_results:
                 st.session_state.ai_results[file_key] = {"filename": orig_name, "desc": "", "analyzed": False}
             
             try:
                 orig_img = Image.open(uploaded_file)
-                st.write(f"🖼️ **รูปภาพที่ {i+1}: {file_key}**")
+                st.write(f"🖼️ **รูปภาพที่ {i+1}: {uploaded_file.name}**")
                 
                 col_ui_img, col_ui_edit, col_ui_btn = st.columns([1.5, 3, 1])
                 
@@ -173,7 +173,6 @@ if uploaded_files:
                                 except Exception as ai_err:
                                     st.error(f"ระบบ AI ขัดข้อง: {ai_err}")
                     
-                    # ✨ เปลี่ยนคำและใส่ Tooltip ให้ผู้ใช้งานเข้าใจว่ามันลบจากกล่องบนไม่ได้
                     if st.button("❌ ซ่อนภาพนี้ออก", key=f"del_btn_{file_key}", help="เป็นการข้ามไม่ประมวลผลภาพนี้ (หากต้องการเอาออกจากกล่องด้านบน ต้องกด X ที่ท้ายชื่อไฟล์ด้านบนครับ)", use_container_width=True):
                         st.session_state.dismissed_files.add(file_key)
                         if file_key in st.session_state.ai_results:
@@ -253,7 +252,7 @@ if uploaded_files:
                 st.write("---")
                 
             except Exception as e:
-                st.error(f"เกิดข้อผิดพลาดกับไฟล์ {file_key}: {e}")
+                st.error(f"เกิดข้อผิดพลาดกับไฟล์ {uploaded_file.name}: {e}")
                 
     else:
-        st.info("ไม่มีรูปภาพรอประมวลผลบนหน้าจอแล้วครับ สามารถลากไฟล์ภาพชุดใหม่ลงมาได้เลย")
+        st.info("ไม่มีรูปภาพรอประมวลผลบนหน้าจอแล้วครับ สามารถลากไฟล์ภาพหรือกดวางภาพชุดใหม่ลงมาได้เลย")
